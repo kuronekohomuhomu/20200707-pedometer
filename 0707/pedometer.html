@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>歩数計</title>
+<script>
+let stepData = new Array();
+let steps = -1;
+let status = "down";
+
+const init = () => {
+    // 歩数データの読み込み
+    const loadData = localStorage.getItem("pedometer");
+    if (loadData != null) stepData = JSON.parse(loadData);
+    // 本日の歩数を取得
+    const [yy, mm, dd, dateText] = getYMD();
+    steps = getSteps(yy, mm, dd);
+    if (steps < 0) {
+        // 本日のデータを追加
+        steps = 0;
+        stepData.push({"date":`${yy}/${mm}/${dd}`, "step":steps});
+    }
+    // 日付、歩数、グラフの表示
+    showStepData();
+    // 加速度センサーで歩数をカウント
+    if (window.DeviceMotionEvent) {
+        window.addEventListener("devicemotion", countSteps);
+    } else {
+        // 未対応
+        document.getElementById("today_steps").innetText = "---";
+    }
+}
+
+const getYMD = (date = new Date()) => {
+    // 年月日の取得
+    const yy = date.getFullYear();
+    const mm = date.getMonth() + 1;
+    const dd = date.getDate();
+    let dateText = `${yy}/${("00"+mm).slice(-2)}/${("00"+dd).slice(-2)}`;
+    const dayName = ["日", "月", "火", "水", "木", "金", "土"];
+    dateText += ` (${dayName[date.getDay()]}) `;
+    return [yy, mm, dd, dateText];
+}
+
+const getSteps = (yy, mm, dd) => {
+    // 歩数を取得
+    const index = stepData.findIndex(({date}) => date == `${yy}/${mm}/${dd}`);
+    let dateSteps = -1;
+    if (index > -1) dateSteps = stepData[index].step;
+    return dateSteps;
+}
+
+const showStepData = () => {
+    // 本日の日付、歩数の表示
+    const today = new Date();
+    const [yy, mm, dd, dateText] = getYMD(today);
+    document.getElementById("today").innerText = dateText;
+    document.getElementById("today_steps").innerText = steps;
+    // 開始日（開始月の初日）、最大歩数を取得
+    let startDate = today;
+    let maxStep = 1000;
+    for (const sdata of stepData) {
+        const [yy, mm, dd] = sdata.date.split("/");
+        const date = new Date(yy, mm-1, dd);
+        if (date < startDate) startDate = date.setDate(1);
+        if (sdata.step > maxStep) maxStep = sdata.step;
+    }
+    // グラフの表示
+    document.getElementById("graph").innerHTML = "";
+    let targetDate = today, checkToday = true, monthStep = 0;
+    while (startDate <= targetDate) {
+        // 年月日曜日の取得
+        const [yy, mm, dd, dateText] = getYMD(targetDate);
+        // 歩数データの取得
+        let dateStep = getSteps(yy, mm, dd);
+        if (dateStep < 0) dateStep = 0;
+        monthStep += dateStep;
+        // グラフを作成
+        const dateRow = document.createElement("div");
+        dateRow.className = "row";
+        const dateDiv = document.createElement("div");
+        dateDiv.className = "date";
+        dateDiv.innerText = dateText;
+        dateRow.appendChild(dateDiv);
+        const stepDiv = document.createElement("div");
+        stepDiv.className = "step";
+        stepDiv.innerText = dateStep;
+        dateRow.appendChild(stepDiv);
+        const barDiv = document.createElement("div");
+        barDiv.className = "bar";
+        if (checkToday) barDiv.classList.add("today_bar");
+        barDiv.style.width = `${Math.floor(dateStep / maxStep * 500)}px`;
+        todayBar = barDiv;
+        dateRow.appendChild(barDiv);
+        document.getElementById("graph").appendChild(dateRow);
+        // 月の区切り
+        if (targetDate.getDate() == 1) {
+            const monthRow = document.createElement("div");
+            monthRow.className = "row";
+            const monthDiv = document.createElement("div");
+            monthDiv.className = "date";
+            monthDiv.innerText = `*** ${mm}月合計 ***`;
+            monthRow.appendChild(monthDiv);
+            const monthStepDiv = document.createElement("div");
+            monthStepDiv.className = "step";
+            monthStepDiv.innerText = monthStep;
+            monthRow.appendChild(monthStepDiv);
+            document.getElementById("graph").appendChild(monthRow);
+            const hr = document.createElement("hr");
+            document.getElementById("graph").appendChild(hr);
+            monthStep = 0;
+        }
+        // 日付の減算
+        targetDate.setDate(targetDate.getDate() - 1);
+        checkToday = false;
+    }
+}
+
+const countSteps = event => {
+    // 加速度を取得
+    const a = event.accelerationIncludingGravity;
+    const d = Math.hypot(a.x, a.y, a.z);
+    if ((status == "down") && (d > 11)) {
+        // 足を上げる
+        status = "up";
+    } else if ((status == "up") && (d < 10)) {
+        // 足を下ろす
+        steps++;
+        status = "down";
+    }
+    // 本日の歩数を更新
+    const [yy, mm, dd, dateText] = getYMD();
+    const index = stepData.findIndex(({date}) => date == `${yy}/${mm}/${dd}`);
+    if (index > -1) {
+        stepData[index].step = steps;
+    } else {
+        // 日付が変わった
+        steps = 0;
+        stepData.push({"date":`${yy}/${mm}/${dd}`, "step":steps});
+    }
+    if (a.z != null) {
+        // ローカルストレージに歩数データを保存
+        localStorage.setItem("pedometer", JSON.stringify(stepData));
+        // 日付、歩数、グラフの表示
+        showStepData();
+    } else {
+        // 未対応
+        document.getElementById("today_steps").innerText = "---";
+    }
+}
+</script>
+<style>
+#today {color: #3366CC;}
+#today_steps {
+    font-size: 60px;
+    font-weight: bold;
+    color: #3366CC;
+}
+.row div {display: inline-block;}
+.date {width: 150px;}
+.step {
+    width: 60px;
+    margin-right: 10px;
+    text-align: right;
+}
+.bar {
+    height: 10px;
+    background-color: #339999;
+}
+.today_bar {background-color: #CC3333!important;}
+</style>
+</head>
+<body onload="init()">
+<p>歩数計</p>
+<hr>
+<div id="today"></div>
+<div id="today_steps"></div>
+<hr>
+<div id="graph"></div>
+</body>
+</html>
